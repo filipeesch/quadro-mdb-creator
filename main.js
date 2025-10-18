@@ -433,6 +433,58 @@ class PipeStructureEditor {
         
         this.raycaster.setFromCamera(this.mouse, this.camera);
         
+        // In layer view mode, check if clicked object is in current layer
+        if (this.layerView.enabled && this.layerView.layers.length > 0) {
+            const currentLayer = this.layerView.layers[this.layerView.currentLayer];
+            
+            // Check if clicking on a pipe
+            const pipeArray = Array.from(this.pipes.values());
+            const pipeIntersects = this.raycaster.intersectObjects(pipeArray);
+            
+            if (pipeIntersects.length > 0) {
+                const clickedPipe = pipeIntersects[0].object;
+                // Only allow removal if pipe is in current layer
+                const isInCurrentLayer = currentLayer.pipes.includes(clickedPipe) || 
+                                        currentLayer.verticalPipes.includes(clickedPipe);
+                if (!isInCurrentLayer) {
+                    this.updateStatus('Cannot edit - Switch to this layer first');
+                    return;
+                }
+            }
+            
+            // Check if clicking on a potential pipe (for adding)
+            const potentialTubes = this.potentialPipes
+                .filter(p => p.visible && p.userData.tube)
+                .map(p => p.userData.tube);
+            
+            const tubeIntersects = this.raycaster.intersectObjects(potentialTubes);
+            if (tubeIntersects.length > 0) {
+                const tube = tubeIntersects[0].object;
+                const parentLine = this.potentialPipes.find(p => p.userData.tube === tube);
+                if (parentLine && parentLine.visible) {
+                    // Check if this potential pipe would be in current layer
+                    const start = parentLine.userData.start;
+                    const end = parentLine.userData.end;
+                    const minY = Math.min(start.y, end.y);
+                    const maxY = Math.max(start.y, end.y);
+                    
+                    // Horizontal pipe - must be at current layer's Y
+                    if (Math.abs(start.y - end.y) < 0.01) {
+                        if (Math.abs(currentLayer.y - start.y) > 0.01) {
+                            this.updateStatus('Cannot add - Not in current layer');
+                            return;
+                        }
+                    } else {
+                        // Vertical pipe - must start at current layer
+                        if (Math.abs(currentLayer.y - minY) > 0.01) {
+                            this.updateStatus('Cannot add - Vertical pipe must start at current layer');
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+        
         // Increase raycaster threshold for better clicking on lines
         this.raycaster.params.Line.threshold = 0.2;
         
@@ -504,14 +556,32 @@ class PipeStructureEditor {
             const tube = initialTubeIntersects[0].object;
             const parentLine = this.potentialPipes.find(p => p.userData.tube === tube);
             if (parentLine) {
-                parentLine.visible = true;
-                parentLine.material.opacity = 1.0;
-                parentLine.userData.tube.visible = true;
-                parentLine.userData.tube.material.opacity = 0.7;
-                this.renderer.domElement.style.cursor = 'pointer';
+                // In layer view, check if this pipe belongs to current layer
+                let shouldShow = true;
+                if (this.layerView.enabled && this.layerView.layers.length > 0) {
+                    const currentLayer = this.layerView.layers[this.layerView.currentLayer];
+                    const start = parentLine.userData.start;
+                    const end = parentLine.userData.end;
+                    const minY = Math.min(start.y, end.y);
+                    
+                    const isHorizontal = Math.abs(start.y - end.y) < 0.01;
+                    const belongsToLayer = isHorizontal 
+                        ? Math.abs(currentLayer.y - start.y) < 0.01
+                        : Math.abs(currentLayer.y - minY) < 0.01;
+                    
+                    shouldShow = belongsToLayer;
+                }
                 
-                // Mark only this pipe to keep visible
-                pipesToKeepVisible.add(parentLine.userData.key);
+                if (shouldShow) {
+                    parentLine.visible = true;
+                    parentLine.material.opacity = 1.0;
+                    parentLine.userData.tube.visible = true;
+                    parentLine.userData.tube.material.opacity = 0.7;
+                    this.renderer.domElement.style.cursor = 'pointer';
+                    
+                    // Mark only this pipe to keep visible
+                    pipesToKeepVisible.add(parentLine.userData.key);
+                }
             }
         }
         
@@ -523,15 +593,46 @@ class PipeStructureEditor {
             const hoveredJunction = junctionIntersects[0].object;
             const junctionPos = hoveredJunction.userData.position;
             
-            // Show potential pipes connected to this junction
-            this.potentialPipes.forEach(pipe => {
-                if (this.positionEquals(pipe.userData.start, junctionPos) || 
-                    this.positionEquals(pipe.userData.end, junctionPos)) {
-                    pipesToKeepVisible.add(pipe.userData.key);
+            // If in layer view, only show potential pipes for junctions in current layer
+            if (this.layerView.enabled && this.layerView.layers.length > 0) {
+                const currentLayer = this.layerView.layers[this.layerView.currentLayer];
+                const junctionInCurrentLayer = currentLayer.junctions.some(j => 
+                    this.positionEquals(j.position, junctionPos)
+                );
+                
+                // Only show pipes if junction is in current layer
+                if (junctionInCurrentLayer) {
+                    // Show only potential pipes that belong to current layer
+                    this.potentialPipes.forEach(pipe => {
+                        if (this.positionEquals(pipe.userData.start, junctionPos) || 
+                            this.positionEquals(pipe.userData.end, junctionPos)) {
+                            const start = pipe.userData.start;
+                            const end = pipe.userData.end;
+                            const minY = Math.min(start.y, end.y);
+                            
+                            // Check if pipe would be in current layer
+                            const isHorizontal = Math.abs(start.y - end.y) < 0.01;
+                            const belongsToLayer = isHorizontal 
+                                ? Math.abs(currentLayer.y - start.y) < 0.01
+                                : Math.abs(currentLayer.y - minY) < 0.01;
+                            
+                            if (belongsToLayer) {
+                                pipesToKeepVisible.add(pipe.userData.key);
+                            }
+                        }
+                    });
+                    this.renderer.domElement.style.cursor = 'pointer';
                 }
-            });
-            
-            this.renderer.domElement.style.cursor = 'pointer';
+            } else {
+                // Not in layer view - show all pipes from this junction
+                this.potentialPipes.forEach(pipe => {
+                    if (this.positionEquals(pipe.userData.start, junctionPos) || 
+                        this.positionEquals(pipe.userData.end, junctionPos)) {
+                        pipesToKeepVisible.add(pipe.userData.key);
+                    }
+                });
+                this.renderer.domElement.style.cursor = 'pointer';
+            }
         }
         
         // Now show all pipes that should be visible

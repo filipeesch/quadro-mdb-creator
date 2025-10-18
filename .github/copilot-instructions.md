@@ -75,3 +75,13 @@ JSON structure with `version`, `junctions[]`, `pipes[]` arrays. Positions stored
 3. Test removing by clicking gray pipes
 4. Test layer view with structures having multiple Y levels
 5. Test touch on actual mobile device or Chrome DevTools device mode
+
+## Documentation Updates
+**CRITICAL**: When adding or modifying features, ALWAYS update the README.md file:
+- Add new features to the appropriate section (Features, Controls, etc.)
+- Keep descriptions **user-focused** and **non-technical**
+- Explain **what it does** and **how to use it**, not how it's implemented
+- Update the "Planned Features" section if completing a feature
+- Add practical tips if the feature has usage nuances
+- Keep language simple and action-oriented
+- README.md is for END USERS, not developers (no code, architecture, or technical details)
