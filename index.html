@@ -61,6 +61,12 @@
             position: relative;
         }
         
+        .button svg {
+            width: 24px;
+            height: 24px;
+            fill: currentColor;
+        }
+        
         .button:hover {
             background: #45a049;
         }
@@ -101,6 +107,16 @@
         
         .button.active:hover {
             background: #F57C00;
+        }
+        
+        .button:disabled {
+            background: #666;
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        
+        .button:disabled:hover::after {
+            content: 'Nothing to undo';
         }
         
         #layer-controls {
@@ -202,6 +218,18 @@
             border-radius: 4px;
             font-size: 12px;
         }
+        
+        /* Startup modal button hover effects */
+        #new-file-btn:hover,
+        #open-existing-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        
+        #new-file-btn:active,
+        #open-existing-btn:active {
+            transform: translateY(0);
+        }
     </style>
 </head>
 <body>
@@ -209,11 +237,36 @@
     
     <div id="ui-panel">
         <h2>Pipe Structure Editor</h2>
-        <button class="button active" id="create-btn" data-tooltip="Creation Mode" title="Creation Mode">✏️</button>
-        <button class="button" id="save-btn" data-tooltip="Save" title="Save">💾</button>
-        <button class="button secondary" id="open-btn" data-tooltip="Open" title="Open">📂</button>
-        <button class="button" id="layer-btn" data-tooltip="Layer View" title="Layer View">📊</button>
-        <button class="button danger" id="clear-btn" data-tooltip="Clear All" title="Clear All">🗑️</button>
+        <button class="button active" id="create-btn" data-tooltip="Creation Mode" title="Creation Mode">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+            </svg>
+        </button>
+        <button class="button" id="undo-btn" data-tooltip="Undo (Ctrl+Z)" title="Undo">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/>
+            </svg>
+        </button>
+        <button class="button" id="save-btn" data-tooltip="Save" title="Save">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/>
+            </svg>
+        </button>
+        <button class="button secondary" id="open-btn" data-tooltip="Open" title="Open">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"/>
+            </svg>
+        </button>
+        <button class="button" id="layer-btn" data-tooltip="Layer View" title="Layer View">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z"/>
+            </svg>
+        </button>
+        <button class="button danger" id="clear-btn" data-tooltip="Clear All" title="Clear All">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+            </svg>
+        </button>
         
         <div class="info">
             <p><strong>Controls:</strong></p>
@@ -245,6 +298,62 @@
     <input type="file" id="file-input" accept=".json" style="display: none;">
     
     <div id="status">Ready</div>
+    
+    <!-- Startup Modal -->
+    <div id="startup-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.9); display: flex; align-items: center; justify-content: center; z-index: 10000;">
+        <div style="background: #2c2c2c; padding: 40px; border-radius: 12px; max-width: 500px; text-align: center; color: white;">
+            <h1 style="margin-top: 0; font-size: 28px; margin-bottom: 10px;">3D Pipe Structure Editor</h1>
+            <p style="color: #aaa; margin-bottom: 30px; font-size: 14px;">Choose how to start</p>
+            
+            <button id="new-file-btn" style="
+                background: #4CAF50;
+                color: white;
+                border: none;
+                padding: 20px 40px;
+                margin: 10px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 16px;
+                font-weight: bold;
+                min-width: 200px;
+                transition: all 0.3s;
+            ">
+                <svg style="width: 24px; height: 24px; vertical-align: middle; margin-right: 8px; fill: currentColor;" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 14h-3v3h-2v-3H8v-2h3v-3h2v3h3v2zm-3-7V3.5L18.5 9H13z"/>
+                </svg>
+                Create New Model
+            </button>
+            
+            <button id="open-existing-btn" style="
+                background: #2196F3;
+                color: white;
+                border: none;
+                padding: 20px 40px;
+                margin: 10px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 16px;
+                font-weight: bold;
+                min-width: 200px;
+                transition: all 0.3s;
+            ">
+                <svg style="width: 24px; height: 24px; vertical-align: middle; margin-right: 8px; fill: currentColor;" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"/>
+                </svg>
+                Open Existing Model
+            </button>
+            
+            <p style="color: #666; margin-top: 30px; font-size: 12px; line-height: 1.6;">
+                New models will autosave to your chosen location.<br>
+                All changes and undo history are preserved.
+            </p>
+        </div>
+    </div>
+    
+    <script>
+        console.log('HTML loaded, JavaScript is working!');
+        console.log('Undo button exists:', !!document.getElementById('undo-btn'));
+    </script>
     
     <script type="module" src="main.js"></script>
 </body>

@@ -1,8 +1,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
+console.log('=== MAIN.JS LOADED ===');
+
 class PipeStructureEditor {
     constructor() {
+        console.log('=== CONSTRUCTOR CALLED ===');
         this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -30,6 +33,19 @@ class PipeStructureEditor {
         // Creation mode state
         this.creationMode = true;
         
+        // Undo history
+        this.undoHistory = [];
+        this.maxUndoSteps = 50;
+        
+        // Autosave state
+        this.fileHandle = null;
+        this.isDirty = false;
+        this.autosaveInterval = null;
+        this.autosaveDelay = 3000; // 3 seconds after last change
+    // Fallback autosave key when File System Access API is not available
+    this.fallbackAutosaveKey = 'quadro_autosave';
+    this.fallbackFileName = null; // optional name for the autosave blob
+        
         // Data structures
         this.junctions = new Map(); // key: "x,y,z" -> junction object
         this.pipes = new Map(); // key: "x1,y1,z1-x2,y2,z2" -> pipe object
@@ -42,8 +58,10 @@ class PipeStructureEditor {
         this.setupCamera();
         this.setupLights();
         this.setupControls();
+        this.setupGrid(); // Add grid once during initialization
         this.setupEventListeners();
-        this.createInitialStructure();
+        // Don't create initial structure - wait for user to choose new/open
+        this.setupStartupModal();
         this.animate();
     }
     
@@ -87,6 +105,13 @@ class PipeStructureEditor {
         };
     }
     
+    setupGrid() {
+        // Add grid helper with lighter gray color
+        const gridHelper = new THREE.GridHelper(20, 20, 0xcccccc, 0xe0e0e0);
+        gridHelper.name = 'gridHelper'; // Name it so we can find it later if needed
+        this.scene.add(gridHelper);
+    }
+    
     setupEventListeners() {
         window.addEventListener('resize', () => this.onWindowResize());
         this.renderer.domElement.addEventListener('click', (e) => this.onMouseClick(e));
@@ -110,10 +135,23 @@ class PipeStructureEditor {
         this.renderer.domElement.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
         
         document.getElementById('create-btn').addEventListener('click', () => this.toggleCreationMode());
+        document.getElementById('undo-btn').addEventListener('click', () => {
+            console.log('=== UNDO BUTTON CLICKED ===');
+            this.undo();
+        });
         document.getElementById('save-btn').addEventListener('click', () => this.saveStructure());
         document.getElementById('open-btn').addEventListener('click', () => this.openStructure());
         document.getElementById('clear-btn').addEventListener('click', () => this.clearAll());
         document.getElementById('file-input').addEventListener('change', (e) => this.handleFileOpen(e));
+        
+        // Keyboard shortcuts
+        window.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+                e.preventDefault();
+                console.log('=== CTRL+Z PRESSED ===');
+                this.undo();
+            }
+        });
         
         // Layer view controls
         document.getElementById('layer-btn').addEventListener('click', () => this.toggleLayerView());
@@ -128,9 +166,219 @@ class PipeStructureEditor {
         this.createJunction(origin, []);
         this.createStarAtPosition(origin);
         
-        // Add grid helper with lighter gray color
-        const gridHelper = new THREE.GridHelper(20, 20, 0xcccccc, 0xe0e0e0);
-        this.scene.add(gridHelper);
+        this.updateUndoButton(); // Initialize button state
+    }
+    
+    setupStartupModal() {
+        const modal = document.getElementById('startup-modal');
+        const newFileBtn = document.getElementById('new-file-btn');
+        const openExistingBtn = document.getElementById('open-existing-btn');
+        
+        newFileBtn.addEventListener('click', async () => {
+            await this.createNewFile();
+            modal.style.display = 'none';
+        });
+        
+        openExistingBtn.addEventListener('click', async () => {
+            await this.openExistingFile();
+            modal.style.display = 'none';
+        });
+    }
+    
+    async createNewFile() {
+        try {
+            // Check if File System Access API is available
+            if ('showSaveFilePicker' in window) {
+                console.log('=== CREATING NEW FILE ===');
+                this.fileHandle = await window.showSaveFilePicker({
+                    suggestedName: 'pipe-structure.json',
+                    types: [{
+                        description: 'Pipe Structure Files',
+                        accept: { 'application/json': ['.json'] }
+                    }]
+                });
+                
+                console.log('File handle obtained:', this.fileHandle.name);
+                
+                // Create initial structure
+                this.createInitialStructure();
+                
+                // Save initial empty structure
+                await this.performAutosave();
+                
+                this.updateStatus('New model created - Autosave enabled');
+                console.log('Starting autosave timer...');
+                this.startAutosave();
+            } else {
+                // Fallback for browsers without File System Access API
+                console.log('File System Access API not available - fallback mode');
+                console.warn('Your browser does not support File System Access API. Please use Chrome 86+, Edge 86+, or Opera 72+ for autosave functionality.');
+                alert('Autosave requires Chrome, Edge, or Opera browser.\n\nYour current browser does not support the File System Access API.\n\nPlease:\n1. Use Chrome, Edge, or Opera for autosave, OR\n2. Manually save your work frequently using the Save button.');
+                this.createInitialStructure();
+                this.updateStatus('No autosave - Use Chrome/Edge/Opera or Save button');
+            }
+        } catch (err) {
+            if (err.name !== 'AbortError') {
+                console.error('Error creating new file:', err);
+                this.updateStatus('Error creating file');
+            } else {
+                console.log('User cancelled file creation');
+            }
+            // User cancelled - create structure anyway
+            this.createInitialStructure();
+        }
+    }
+    
+    async openExistingFile() {
+        try {
+            if ('showOpenFilePicker' in window) {
+                console.log('=== OPENING EXISTING FILE ===');
+                const [fileHandle] = await window.showOpenFilePicker({
+                    types: [{
+                        description: 'Pipe Structure Files',
+                        accept: { 'application/json': ['.json'] }
+                    }]
+                });
+                
+                this.fileHandle = fileHandle;
+                console.log('File handle obtained:', fileHandle.name);
+                
+                const file = await fileHandle.getFile();
+                const contents = await file.text();
+                const structure = JSON.parse(contents);
+                
+                this.loadStructure(structure);
+                this.updateStatus('Model loaded - Autosave enabled');
+                console.log('Starting autosave timer...');
+                this.startAutosave();
+            } else {
+                // Fallback - use traditional file input
+                console.log('File System Access API not available - using fallback');
+                console.warn('Your browser does not support File System Access API. Autosave will not be available.');
+                // When user selects a file via input, handleFileOpen will load it
+                document.getElementById('file-input').click();
+            }
+        } catch (err) {
+            if (err.name !== 'AbortError') {
+                console.error('Error opening file:', err);
+                this.updateStatus('Error opening file');
+            } else {
+                console.log('User cancelled file open');
+            }
+            // User cancelled - create initial structure
+            this.createInitialStructure();
+        }
+    }
+    
+    startAutosave() {
+        console.log('=== STARTING AUTOSAVE TIMER ===');
+        // Clear any existing autosave timer
+        if (this.autosaveInterval) {
+            clearTimeout(this.autosaveInterval);
+        }
+        
+        // Schedule autosave check
+        this.scheduleAutosave();
+        console.log('Autosave timer scheduled for', this.autosaveDelay / 1000, 'seconds from now');
+    }
+    
+    scheduleAutosave() {
+        if (this.autosaveInterval) {
+            clearTimeout(this.autosaveInterval);
+        }
+        
+        this.autosaveInterval = setTimeout(async () => {
+            console.log('Autosave check - isDirty:', this.isDirty, 'hasFileHandle:', !!this.fileHandle);
+            if (this.isDirty && this.fileHandle) {
+                await this.performAutosave();
+            }
+            // Continue checking
+            this.scheduleAutosave();
+        }, this.autosaveDelay);
+    }
+    
+    async performAutosave() {
+        if (!this.fileHandle) {
+            console.log('No file handle - skipping autosave');
+            return;
+        }
+        
+        console.log('=== PERFORMING AUTOSAVE ===');
+        
+        try {
+            const structure = this.getCurrentStructure();
+            const json = JSON.stringify(structure, null, 2);
+            
+            console.log('Creating writable stream...');
+            const writable = await this.fileHandle.createWritable();
+            console.log('Writing data...');
+            await writable.write(json);
+            console.log('Closing stream...');
+            await writable.close();
+            
+            this.isDirty = false;
+            console.log('=== AUTOSAVE SUCCESSFUL ===');
+            
+            // Briefly show autosave indicator
+            const oldStatus = document.getElementById('status').textContent;
+            this.updateStatus('Autosaved');
+            setTimeout(() => {
+                if (document.getElementById('status').textContent === 'Autosaved') {
+                    document.getElementById('status').textContent = 'Ready';
+                }
+            }, 1500);
+        } catch (err) {
+            console.error('=== AUTOSAVE FAILED ===', err);
+            this.updateStatus('Autosave failed - check permissions');
+        }
+    }
+    
+    getCurrentStructure() {
+        const structure = {
+            version: '2.0', // Increment version to indicate undo history support
+            junctions: [],
+            pipes: [],
+            undoHistory: []
+        };
+        
+        this.junctions.forEach((junction, key) => {
+            structure.junctions.push({
+                position: {
+                    x: junction.position.x,
+                    y: junction.position.y,
+                    z: junction.position.z
+                },
+                connections: junction.connectedDirections.length
+            });
+        });
+        
+        this.pipes.forEach((pipe, key) => {
+            structure.pipes.push({
+                start: {
+                    x: pipe.userData.start.x,
+                    y: pipe.userData.start.y,
+                    z: pipe.userData.start.z
+                },
+                end: {
+                    x: pipe.userData.end.x,
+                    y: pipe.userData.end.y,
+                    z: pipe.userData.end.z
+                }
+            });
+        });
+        
+        // Save undo history
+        structure.undoHistory = this.undoHistory.map(state => ({
+            junctions: state.junctions,
+            pipes: state.pipes
+        }));
+        
+        return structure;
+    }
+    
+    markDirty() {
+        this.isDirty = true;
+        console.log('=== MARKED DIRTY - Autosave will trigger in', this.autosaveDelay / 1000, 'seconds ===');
     }
     
     createStarAtPosition(position) {
@@ -224,8 +472,8 @@ class PipeStructureEditor {
             key: this.getPipeKey(start, end)
         };
         
-        // Set initial visibility based on creation mode
-        line.visible = this.creationMode;
+        // Always start hidden - will only show on hover in creation mode
+        line.visible = false;
         
         // Make the line thicker by adding a cylinder overlay with larger radius for easier clicking
         const direction = new THREE.Vector3().subVectors(end, start);
@@ -237,13 +485,15 @@ class PipeStructureEditor {
             opacity: 0.3
         });
         const tube = new THREE.Mesh(tubeGeometry, tubeMaterial);
-        tube.visible = this.creationMode;  // Visible in creation mode
         
         tube.position.copy(start).add(direction.clone().multiplyScalar(0.5));
         tube.quaternion.setFromUnitVectors(
             new THREE.Vector3(0, 1, 0),
             direction.clone().normalize()
         );
+        
+        // Start hidden - will show on hover
+        tube.visible = false;
         
         line.userData.tube = tube;
         this.scene.add(line);
@@ -260,6 +510,9 @@ class PipeStructureEditor {
         if (this.pipes.has(key)) {
             return;
         }
+        
+        // Save state before modification
+        this.saveState();
         
         // Create pipe geometry
         const direction = new THREE.Vector3().subVectors(end, start);
@@ -305,6 +558,7 @@ class PipeStructureEditor {
             this.updateLayerView();
         }
         
+        this.markDirty();
         this.updateStatus(`Pipe added`);
     }
     
@@ -314,6 +568,9 @@ class PipeStructureEditor {
         const end = pipe.userData.end;
         
         console.log('Removing pipe:', key);
+        
+        // Save state before modification
+        this.saveState();
         
         this.scene.remove(pipe);
         this.pipes.delete(key);
@@ -362,6 +619,7 @@ class PipeStructureEditor {
             this.updateLayerView();
         }
         
+        this.markDirty();
         this.updateStatus(`Pipe removed`);
     }
     
@@ -433,63 +691,19 @@ class PipeStructureEditor {
         
         this.raycaster.setFromCamera(this.mouse, this.camera);
         
-        // In layer view mode, check if clicked object is in current layer
-        if (this.layerView.enabled && this.layerView.layers.length > 0) {
-            const currentLayer = this.layerView.layers[this.layerView.currentLayer];
-            
-            // Check if clicking on a pipe
-            const pipeArray = Array.from(this.pipes.values());
-            const pipeIntersects = this.raycaster.intersectObjects(pipeArray);
-            
-            if (pipeIntersects.length > 0) {
-                const clickedPipe = pipeIntersects[0].object;
-                // Only allow removal if pipe is in current layer
-                const isInCurrentLayer = currentLayer.pipes.includes(clickedPipe) || 
-                                        currentLayer.verticalPipes.includes(clickedPipe);
-                if (!isInCurrentLayer) {
-                    this.updateStatus('Cannot edit - Switch to this layer first');
-                    return;
-                }
-            }
-            
-            // Check if clicking on a potential pipe (for adding)
-            const potentialTubes = this.potentialPipes
-                .filter(p => p.visible && p.userData.tube)
-                .map(p => p.userData.tube);
-            
-            const tubeIntersects = this.raycaster.intersectObjects(potentialTubes);
-            if (tubeIntersects.length > 0) {
-                const tube = tubeIntersects[0].object;
-                const parentLine = this.potentialPipes.find(p => p.userData.tube === tube);
-                if (parentLine && parentLine.visible) {
-                    // Check if this potential pipe would be in current layer
-                    const start = parentLine.userData.start;
-                    const end = parentLine.userData.end;
-                    const minY = Math.min(start.y, end.y);
-                    const maxY = Math.max(start.y, end.y);
-                    
-                    // Horizontal pipe - must be at current layer's Y
-                    if (Math.abs(start.y - end.y) < 0.01) {
-                        if (Math.abs(currentLayer.y - start.y) > 0.01) {
-                            this.updateStatus('Cannot add - Not in current layer');
-                            return;
-                        }
-                    } else {
-                        // Vertical pipe - must start at current layer
-                        if (Math.abs(currentLayer.y - minY) > 0.01) {
-                            this.updateStatus('Cannot add - Vertical pipe must start at current layer');
-                            return;
-                        }
-                    }
-                }
-            }
-        }
-        
         // Increase raycaster threshold for better clicking on lines
         this.raycaster.params.Line.threshold = 0.2;
         
         // Check for clicks on existing pipes first
-        const pipeArray = Array.from(this.pipes.values());
+        // In layer view, only check pipes from current layer
+        let pipeArray;
+        if (this.layerView.enabled && this.layerView.layers.length > 0) {
+            const currentLayer = this.layerView.layers[this.layerView.currentLayer];
+            pipeArray = [...currentLayer.pipes, ...currentLayer.verticalPipes];
+        } else {
+            pipeArray = Array.from(this.pipes.values());
+        }
+        
         const pipeIntersects = this.raycaster.intersectObjects(pipeArray);
         
         if (pipeIntersects.length > 0) {
@@ -498,9 +712,33 @@ class PipeStructureEditor {
         }
         
         // Check for clicks on potential pipe tubes (thicker, easier to click)
-        const potentialTubes = this.potentialPipes
-            .filter(p => p.visible && p.userData.tube)
-            .map(p => p.userData.tube);
+        // In layer view, only check tubes from visible potential pipes in current layer
+        let potentialTubes;
+        if (this.layerView.enabled && this.layerView.layers.length > 0) {
+            const currentLayer = this.layerView.layers[this.layerView.currentLayer];
+            // Only check tubes for potential pipes that would belong to current layer
+            potentialTubes = this.potentialPipes
+                .filter(p => {
+                    if (!p.visible || !p.userData.tube) return false;
+                    
+                    const start = p.userData.start;
+                    const end = p.userData.end;
+                    const minY = Math.min(start.y, end.y);
+                    const isHorizontal = Math.abs(start.y - end.y) < 0.01;
+                    
+                    // Check if pipe belongs to current layer
+                    const belongsToLayer = isHorizontal 
+                        ? Math.abs(currentLayer.y - start.y) < 0.01
+                        : Math.abs(currentLayer.y - minY) < 0.01;
+                    
+                    return belongsToLayer;
+                })
+                .map(p => p.userData.tube);
+        } else {
+            potentialTubes = this.potentialPipes
+                .filter(p => p.visible && p.userData.tube)
+                .map(p => p.userData.tube);
+        }
         
         const tubeIntersects = this.raycaster.intersectObjects(potentialTubes);
         if (tubeIntersects.length > 0) {
@@ -543,9 +781,32 @@ class PipeStructureEditor {
         }
         
         // First, check for intersections with visible potential pipe tubes
-        const visiblePotentialTubes = this.potentialPipes
-            .filter(p => p.userData.tube)
-            .map(p => p.userData.tube);
+        // In layer view, only check tubes that belong to current layer
+        let visiblePotentialTubes;
+        if (this.layerView.enabled && this.layerView.layers.length > 0) {
+            const currentLayer = this.layerView.layers[this.layerView.currentLayer];
+            visiblePotentialTubes = this.potentialPipes
+                .filter(p => {
+                    if (!p.userData.tube) return false;
+                    
+                    const start = p.userData.start;
+                    const end = p.userData.end;
+                    const minY = Math.min(start.y, end.y);
+                    const isHorizontal = Math.abs(start.y - end.y) < 0.01;
+                    
+                    // Only include tubes from potential pipes in current layer
+                    const belongsToLayer = isHorizontal 
+                        ? Math.abs(currentLayer.y - start.y) < 0.01
+                        : Math.abs(currentLayer.y - minY) < 0.01;
+                    
+                    return belongsToLayer;
+                })
+                .map(p => p.userData.tube);
+        } else {
+            visiblePotentialTubes = this.potentialPipes
+                .filter(p => p.userData.tube)
+                .map(p => p.userData.tube);
+        }
         
         const initialTubeIntersects = this.raycaster.intersectObjects(visiblePotentialTubes);
         
@@ -586,7 +847,15 @@ class PipeStructureEditor {
         }
         
         // Check for intersections with junctions
-        const junctionArray = Array.from(this.junctions.values()).map(j => j.mesh);
+        // In layer view, only check junctions from current layer
+        let junctionArray;
+        if (this.layerView.enabled && this.layerView.layers.length > 0) {
+            const currentLayer = this.layerView.layers[this.layerView.currentLayer];
+            junctionArray = currentLayer.junctions.map(j => j.mesh);
+        } else {
+            junctionArray = Array.from(this.junctions.values()).map(j => j.mesh);
+        }
+        
         const junctionIntersects = this.raycaster.intersectObjects(junctionArray);
         
         if (junctionIntersects.length > 0) {
@@ -662,12 +931,21 @@ class PipeStructureEditor {
         }
         
         // Highlight existing pipes on hover
-        const pipeArray = Array.from(this.pipes.values());
-        pipeArray.forEach(pipe => {
+        // In layer view, only highlight pipes from current layer
+        let hoverPipeArray;
+        if (this.layerView.enabled && this.layerView.layers.length > 0) {
+            const currentLayer = this.layerView.layers[this.layerView.currentLayer];
+            hoverPipeArray = [...currentLayer.pipes, ...currentLayer.verticalPipes];
+        } else {
+            hoverPipeArray = Array.from(this.pipes.values());
+        }
+        
+        // Reset emissive for all pipes
+        Array.from(this.pipes.values()).forEach(pipe => {
             pipe.material.emissive.setHex(0x000000);
         });
         
-        const pipeIntersects = this.raycaster.intersectObjects(pipeArray);
+        const pipeIntersects = this.raycaster.intersectObjects(hoverPipeArray);
         if (pipeIntersects.length > 0) {
             pipeIntersects[0].object.material.emissive.setHex(0x330000);
             this.renderer.domElement.style.cursor = 'pointer';
@@ -850,38 +1128,7 @@ class PipeStructureEditor {
     }
     
     saveStructure() {
-        const structure = {
-            version: '1.0',
-            junctions: [],
-            pipes: []
-        };
-        
-        this.junctions.forEach((junction, key) => {
-            structure.junctions.push({
-                position: {
-                    x: junction.position.x,
-                    y: junction.position.y,
-                    z: junction.position.z
-                },
-                connections: junction.connectedDirections.length
-            });
-        });
-        
-        this.pipes.forEach((pipe, key) => {
-            structure.pipes.push({
-                start: {
-                    x: pipe.userData.start.x,
-                    y: pipe.userData.start.y,
-                    z: pipe.userData.start.z
-                },
-                end: {
-                    x: pipe.userData.end.x,
-                    y: pipe.userData.end.y,
-                    z: pipe.userData.end.z
-                }
-            });
-        });
-        
+        const structure = this.getCurrentStructure();
         const json = JSON.stringify(structure, null, 2);
         const blob = new Blob([json], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -907,7 +1154,7 @@ class PipeStructureEditor {
             try {
                 const structure = JSON.parse(e.target.result);
                 this.loadStructure(structure);
-                this.updateStatus('Structure loaded');
+                this.updateStatus('Structure loaded - No autosave (File System Access API unavailable)');
             } catch (error) {
                 alert('Error loading file: ' + error.message);
                 this.updateStatus('Error loading file');
@@ -920,6 +1167,8 @@ class PipeStructureEditor {
     }
     
     loadStructure(structure) {
+        console.log('=== LOADING STRUCTURE ===');
+        
         // Clear current structure first
         this.pipes.forEach(pipe => this.scene.remove(pipe));
         this.pipes.clear();
@@ -934,6 +1183,10 @@ class PipeStructureEditor {
             }
         });
         this.potentialPipes = [];
+        
+        // Temporarily disable saveState to prevent saving during restore
+        const originalSaveState = this.saveState;
+        this.saveState = () => {};
         
         // Load pipes from structure
         if (structure.pipes && structure.pipes.length > 0) {
@@ -956,6 +1209,26 @@ class PipeStructureEditor {
             this.createJunction(origin, []);
             this.createStarAtPosition(origin);
         }
+        
+        // Restore saveState function BEFORE loading undo history
+        this.saveState = originalSaveState;
+        
+        // Load undo history AFTER structure is loaded (version 2.0+)
+        // This ensures the undo history is preserved and not overwritten
+        if (structure.undoHistory && Array.isArray(structure.undoHistory)) {
+            this.undoHistory = structure.undoHistory.map(state => ({
+                junctions: state.junctions,
+                pipes: state.pipes
+            }));
+            console.log('Loaded undo history:', this.undoHistory.length, 'states');
+        } else {
+            // Backward compatibility - clear undo history for old files
+            this.undoHistory = [];
+            console.log('No undo history in file (legacy format)');
+        }
+        
+        this.updateUndoButton();
+        console.log('=== STRUCTURE LOADED ===');
     }
     
     clearAll() {
@@ -981,11 +1254,16 @@ class PipeStructureEditor {
             });
             this.potentialPipes = [];
             
+            // Clear undo history
+            this.undoHistory = [];
+            this.updateUndoButton();
+            
             // Recreate initial structure
             const origin = new THREE.Vector3(0, 0, 0);
             this.createJunction(origin, []);
             this.createStarAtPosition(origin);
             
+            this.markDirty();
             this.updateStatus('Structure reset');
         }
     }
@@ -1000,6 +1278,125 @@ class PipeStructureEditor {
         setTimeout(() => {
             document.getElementById('status').textContent = 'Ready';
         }, 3000);
+    }
+    
+    // Undo/Redo Functions
+    saveState() {
+        console.log('=== SAVING STATE ===');
+        const state = {
+            junctions: [],
+            pipes: []
+        };
+        
+        // Save junctions
+        this.junctions.forEach((junction, key) => {
+            state.junctions.push({
+                position: { x: junction.position.x, y: junction.position.y, z: junction.position.z },
+                connections: junction.connectedDirections.length
+            });
+        });
+        
+        // Save pipes
+        this.pipes.forEach((pipe, key) => {
+            state.pipes.push({
+                start: { x: pipe.userData.start.x, y: pipe.userData.start.y, z: pipe.userData.start.z },
+                end: { x: pipe.userData.end.x, y: pipe.userData.end.y, z: pipe.userData.end.z }
+            });
+        });
+        
+        console.log('State saved:', state.pipes.length, 'pipes,', state.junctions.length, 'junctions');
+        
+        this.undoHistory.push(state);
+        
+        if (this.undoHistory.length > this.maxUndoSteps) {
+            this.undoHistory.shift();
+        }
+        
+        console.log('History now has', this.undoHistory.length, 'states');
+        this.updateUndoButton();
+    }
+    
+    undo() {
+        console.log('=== UNDO CALLED ===', 'History length:', this.undoHistory.length);
+        
+        if (this.undoHistory.length === 0) {
+            this.updateStatus('Nothing to undo');
+            return;
+        }
+        
+        const previousState = this.undoHistory.pop();
+        console.log('Restoring state with', previousState.pipes.length, 'pipes');
+        
+        // Restore state directly without calling loadStructure to preserve undo history
+        this.restoreState(previousState);
+        
+        this.markDirty();
+        this.updateUndoButton();
+        this.updateStatus('Undo performed');
+    }
+    
+    restoreState(state) {
+        console.log('=== RESTORING STATE ===');
+        
+        // Clear current structure
+        this.pipes.forEach(pipe => this.scene.remove(pipe));
+        this.pipes.clear();
+        
+        this.junctions.forEach(junction => this.scene.remove(junction.mesh));
+        this.junctions.clear();
+        
+        this.potentialPipes.forEach(pipe => {
+            this.scene.remove(pipe);
+            if (pipe.userData.tube) {
+                this.scene.remove(pipe.userData.tube);
+            }
+        });
+        this.potentialPipes = [];
+        
+        // Temporarily disable saveState to prevent saving during restore
+        const originalSaveState = this.saveState;
+        this.saveState = () => {};
+        
+        // Restore pipes from state
+        if (state.pipes && state.pipes.length > 0) {
+            state.pipes.forEach(pipeData => {
+                const start = new THREE.Vector3(pipeData.start.x, pipeData.start.y, pipeData.start.z);
+                const end = new THREE.Vector3(pipeData.end.x, pipeData.end.y, pipeData.end.z);
+                
+                // Create junction at start if doesn't exist
+                const startKey = this.positionToKey(start);
+                if (!this.junctions.has(startKey)) {
+                    this.createJunction(start, []);
+                }
+                
+                // Add the pipe
+                this.addPipeConnection(start, end);
+            });
+        } else {
+            // If no pipes, create initial structure
+            const origin = new THREE.Vector3(0, 0, 0);
+            this.createJunction(origin, []);
+            this.createStarAtPosition(origin);
+        }
+        
+        // Restore saveState function
+        this.saveState = originalSaveState;
+        
+        // Update layer view if enabled
+        if (this.layerView.enabled) {
+            this.analyzeLayers();
+            this.updateLayerView();
+        }
+        
+        console.log('=== STATE RESTORED ===');
+    }
+    
+    updateUndoButton() {
+        const undoBtn = document.getElementById('undo-btn');
+        if (undoBtn) {
+            undoBtn.disabled = this.undoHistory.length === 0;
+            console.log('Undo button state:', undoBtn.disabled ? 'disabled' : 'enabled', '(history:', this.undoHistory.length + ')');
+        }
     }
     
     // Creation Mode Functions
@@ -1213,4 +1610,6 @@ class PipeStructureEditor {
 }
 
 // Initialize the editor
+console.log('=== ABOUT TO CREATE EDITOR ===');
 const editor = new PipeStructureEditor();
+console.log('=== EDITOR CREATED ===', editor);

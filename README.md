@@ -33,20 +33,39 @@ A web-based 3D pipe structure editor for creating and visualizing modular pipe n
 
 ### 💾 File Operations
 
+#### Startup - Choose Your Path
+When you open the app, you'll see two options:
+- **Create New Model**: Choose where to save your file, then start building
+- **Open Existing Model**: Load a previously saved structure
+
+#### Autosave ✨
+- **Automatic saving** every 3 seconds after you make changes
+- Your work is continuously protected
+- File updates in the background - no interruptions
+- "Autosaved" appears briefly in the status bar
+
 #### Save (💾)
-- Download your structure as a JSON file
-- Saves all pipes and junction positions
-- Can be reloaded later
+- Download your structure as a separate JSON file
+- Saves all pipes, junctions, and undo history
+- Can be used as a backup or to share your work
 
 #### Open (📂)
 - Load previously saved structure files
-- Automatically clears current structure before loading
-- Compatible with all saved files from this editor
+- Restores your structure exactly as it was
+- Brings back your entire undo history
+- Compatible with all saved files (old and new formats)
 
 #### Clear All (🗑️)
 - Remove entire structure and start fresh
 - Asks for confirmation before deleting
 - Returns to initial state with single junction
+
+#### Undo (↶)
+- Revert the last action (add or remove pipe)
+- **Keyboard shortcut**: Ctrl+Z (Cmd+Z on Mac)
+- Keeps history of up to 50 actions
+- Button becomes disabled when there's nothing to undo
+- **Undo history is saved** - you can undo even after reopening a file!
 
 ### 🖱️ Mouse Controls
 
@@ -73,9 +92,12 @@ A web-based 3D pipe structure editor for creating and visualizing modular pipe n
 
 ### Getting Started
 1. Open `index.html` in any modern web browser
-2. You'll see a single junction (black sphere) with potential connections
-3. Hover over the junction to reveal pink lines showing where you can build
-4. Click any pink line to add a pipe
+2. **Choose your path**:
+   - **Create New Model**: Pick where to save, then start building with autosave
+   - **Open Existing Model**: Load a previously saved structure
+3. You'll see a single junction (black sphere) with potential connections
+4. Hover over the junction to reveal pink lines showing where you can build
+5. Click any pink line to add a pipe
 
 ### Building Your Structure
 1. **Hover** over any junction to see available directions
@@ -93,28 +115,37 @@ A web-based 3D pipe structure editor for creating and visualizing modular pipe n
 6. Click Layer View button again to see all layers
 
 ### Managing Files
-- **Save**: Click 💾 to download your structure
+- **Autosave**: Enabled automatically when you create or open a file
+- **Save**: Click 💾 to download a separate copy of your structure
 - **Open**: Click 📂 to load a saved file
 - **Clear**: Click 🗑️ to start over (asks for confirmation)
 
 ## 🌐 Browser Requirements
 
-Works in any modern web browser:
-- Chrome, Firefox, Edge, Safari (latest versions)
-- Mobile browsers on tablets and phones
-- No installation or plugins needed
+**For Full Autosave Functionality:**
+- **Google Chrome 86+** (Recommended)
+- **Microsoft Edge 86+** (Recommended)  
+- **Opera 72+**
+
+**Limited Functionality (Manual Save Only):**
+- Firefox (all versions) - No autosave, use Save button
+- Safari (all versions) - No autosave, use Save button
+
+All browsers support the core editing features. Only autosave requires Chrome/Edge/Opera due to the File System Access API requirement.
+
+**Note:** If you see "File System Access API not available" in your browser, please switch to Chrome or Edge for autosave functionality.
 
 ## ⚠️ Current Limitations
 
-- No undo/redo (save your work frequently!)
 - All pipes look the same (no custom colors or sizes yet)
 - Pipes can overlap (no collision detection)
 - No measurement tools for distances or angles
+- **Autosave only in Chrome/Edge/Opera** - Firefox and Safari require manual saving
 
 ## 🔮 Planned Features
 
-- Undo/Redo functionality
-- Keyboard shortcuts
+- Redo functionality
+- More keyboard shortcuts
 - Custom pipe colors and sizes
 - Measurement tools
 - Different junction types
@@ -123,15 +154,17 @@ Works in any modern web browser:
 - Add labels and notes
 - Multiple grid sizes
 
-## � Tips
+## 💡 Tips
 
-- Save your work regularly (no auto-save yet)
+- **Autosave is your friend** - your work saves automatically every 3 seconds
 - Use layer view to understand complex structures
 - Toggle creation mode off for clean presentations
 - Right-click drag is great for repositioning your view
 - Use touchpad/touch gestures for intuitive mobile editing
+- Undo history is preserved in your files - you can undo after reopening!
 
 ---
 
-**Version**: 1.0  
+**Version**: 2.0  
 **Last Updated**: October 2025
+
