@@ -19,6 +19,17 @@ class PipeStructureEditor {
             zooming: false
         };
         
+        // Layer view state
+        this.layerView = {
+            enabled: false,
+            currentLayer: 0,
+            totalLayers: 0,
+            layers: [] // Array of layer objects with Y coordinates
+        };
+        
+        // Creation mode state
+        this.creationMode = true;
+        
         // Data structures
         this.junctions = new Map(); // key: "x,y,z" -> junction object
         this.pipes = new Map(); // key: "x1,y1,z1-x2,y2,z2" -> pipe object
@@ -98,10 +109,17 @@ class PipeStructureEditor {
         // Wheel event for touchpad pinch zoom
         this.renderer.domElement.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
         
+        document.getElementById('create-btn').addEventListener('click', () => this.toggleCreationMode());
         document.getElementById('save-btn').addEventListener('click', () => this.saveStructure());
         document.getElementById('open-btn').addEventListener('click', () => this.openStructure());
         document.getElementById('clear-btn').addEventListener('click', () => this.clearAll());
         document.getElementById('file-input').addEventListener('change', (e) => this.handleFileOpen(e));
+        
+        // Layer view controls
+        document.getElementById('layer-btn').addEventListener('click', () => this.toggleLayerView());
+        document.getElementById('layer-slider').addEventListener('input', (e) => this.setLayer(parseInt(e.target.value)));
+        document.getElementById('prev-layer').addEventListener('click', () => this.previousLayer());
+        document.getElementById('next-layer').addEventListener('click', () => this.nextLayer());
     }
     
     createInitialStructure() {
@@ -157,7 +175,11 @@ class PipeStructureEditor {
         
         const junctionType = this.getJunctionType(connectedDirections.length);
         const geometry = junctionType.geometry;
-        const material = new THREE.MeshPhongMaterial({ color: 0x333333 });
+        const material = new THREE.MeshPhongMaterial({ 
+            color: 0x333333,
+            transparent: true,
+            opacity: 1.0
+        });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.position.copy(position);
         mesh.userData = { type: 'junction', position: position, key: key };
@@ -202,6 +224,9 @@ class PipeStructureEditor {
             key: this.getPipeKey(start, end)
         };
         
+        // Set initial visibility based on creation mode
+        line.visible = this.creationMode;
+        
         // Make the line thicker by adding a cylinder overlay with larger radius for easier clicking
         const direction = new THREE.Vector3().subVectors(end, start);
         const length = direction.length();
@@ -209,11 +234,10 @@ class PipeStructureEditor {
         const tubeMaterial = new THREE.MeshBasicMaterial({ 
             color: 0xff00ff, 
             transparent: true, 
-            opacity: 0.0,  // Invisible but still clickable
-            visible: false
+            opacity: 0.3
         });
         const tube = new THREE.Mesh(tubeGeometry, tubeMaterial);
-        tube.visible = false;  // Make invisible but keep for raycasting
+        tube.visible = this.creationMode;  // Visible in creation mode
         
         tube.position.copy(start).add(direction.clone().multiplyScalar(0.5));
         tube.quaternion.setFromUnitVectors(
@@ -241,7 +265,11 @@ class PipeStructureEditor {
         const direction = new THREE.Vector3().subVectors(end, start);
         const length = direction.length();
         const geometry = new THREE.CylinderGeometry(this.pipeRadius, this.pipeRadius, length, 16);
-        const material = new THREE.MeshPhongMaterial({ color: 0xaaaaaa });
+        const material = new THREE.MeshPhongMaterial({ 
+            color: 0xaaaaaa,
+            transparent: true,
+            opacity: 1.0
+        });
         const pipe = new THREE.Mesh(geometry, material);
         
         // Position and orient the pipe
@@ -270,6 +298,12 @@ class PipeStructureEditor {
         
         // Hide the potential pipe line
         this.hidePotentialPipe(start, end);
+        
+        // Update layer view if enabled
+        if (this.layerView.enabled) {
+            this.analyzeLayers();
+            this.updateLayerView();
+        }
         
         this.updateStatus(`Pipe added`);
     }
@@ -321,6 +355,12 @@ class PipeStructureEditor {
         
         // Show the potential pipe line again - do this LAST
         this.showPotentialPipe(start, end);
+        
+        // Update layer view if enabled
+        if (this.layerView.enabled) {
+            this.analyzeLayers();
+            this.updateLayerView();
+        }
         
         this.updateStatus(`Pipe removed`);
     }
@@ -386,6 +426,9 @@ class PipeStructureEditor {
         // Only handle left mouse button clicks
         if (event.button !== 0) return;
         
+        // Don't allow editing if creation mode is disabled
+        if (!this.creationMode) return;
+        
         this.updateMousePosition(event);
         
         this.raycaster.setFromCamera(this.mouse, this.camera);
@@ -424,18 +467,84 @@ class PipeStructureEditor {
         this.raycaster.setFromCamera(this.mouse, this.camera);
         this.raycaster.params.Line.threshold = 0.2; // Larger margin for easier hovering
         
-        // Reset all potential pipes to default opacity
+        // Reset all potential pipes to hidden (or default state)
         this.potentialPipes.forEach(pipe => {
-            if (pipe.visible && pipe.userData.tube) {
+            if (pipe.userData.tube) {
                 pipe.material.opacity = 0.5;
                 pipe.userData.tube.material.opacity = 0.3;
+            }
+            // Hide all potential pipes by default when in creation mode
+            if (this.creationMode) {
+                pipe.visible = false;
+                if (pipe.userData.tube) {
+                    pipe.userData.tube.visible = false;
+                }
             }
         });
         
         // Reset cursor
         this.renderer.domElement.style.cursor = 'default';
         
-        // Check for intersections with potential pipe tubes (easier to hover)
+        // Only show hover effects if creation mode is enabled
+        if (!this.creationMode) {
+            return;
+        }
+        
+        // First, check for intersections with visible potential pipe tubes
+        const visiblePotentialTubes = this.potentialPipes
+            .filter(p => p.userData.tube)
+            .map(p => p.userData.tube);
+        
+        const initialTubeIntersects = this.raycaster.intersectObjects(visiblePotentialTubes);
+        
+        // Keep track of which pipes should stay visible
+        const pipesToKeepVisible = new Set();
+        
+        if (initialTubeIntersects.length > 0) {
+            const tube = initialTubeIntersects[0].object;
+            const parentLine = this.potentialPipes.find(p => p.userData.tube === tube);
+            if (parentLine) {
+                parentLine.visible = true;
+                parentLine.material.opacity = 1.0;
+                parentLine.userData.tube.visible = true;
+                parentLine.userData.tube.material.opacity = 0.7;
+                this.renderer.domElement.style.cursor = 'pointer';
+                
+                // Mark only this pipe to keep visible
+                pipesToKeepVisible.add(parentLine.userData.key);
+            }
+        }
+        
+        // Check for intersections with junctions
+        const junctionArray = Array.from(this.junctions.values()).map(j => j.mesh);
+        const junctionIntersects = this.raycaster.intersectObjects(junctionArray);
+        
+        if (junctionIntersects.length > 0) {
+            const hoveredJunction = junctionIntersects[0].object;
+            const junctionPos = hoveredJunction.userData.position;
+            
+            // Show potential pipes connected to this junction
+            this.potentialPipes.forEach(pipe => {
+                if (this.positionEquals(pipe.userData.start, junctionPos) || 
+                    this.positionEquals(pipe.userData.end, junctionPos)) {
+                    pipesToKeepVisible.add(pipe.userData.key);
+                }
+            });
+            
+            this.renderer.domElement.style.cursor = 'pointer';
+        }
+        
+        // Now show all pipes that should be visible
+        this.potentialPipes.forEach(pipe => {
+            if (pipesToKeepVisible.has(pipe.userData.key)) {
+                pipe.visible = true;
+                if (pipe.userData.tube) {
+                    pipe.userData.tube.visible = true;
+                }
+            }
+        });
+        
+        // Check for intersections with potential pipe tubes for highlighting
         const potentialTubes = this.potentialPipes
             .filter(p => p.visible && p.userData.tube)
             .map(p => p.userData.tube);
@@ -790,6 +899,203 @@ class PipeStructureEditor {
         setTimeout(() => {
             document.getElementById('status').textContent = 'Ready';
         }, 3000);
+    }
+    
+    // Creation Mode Functions
+    toggleCreationMode() {
+        this.creationMode = !this.creationMode;
+        const createBtn = document.getElementById('create-btn');
+        
+        if (this.creationMode) {
+            createBtn.classList.add('active');
+            // Don't show potential pipes by default - they'll appear on hover
+            this.hidePotentialPipes();
+            this.updateStatus('Creation mode enabled - Hover over junctions');
+        } else {
+            createBtn.classList.remove('active');
+            this.hidePotentialPipes();
+            this.updateStatus('Creation mode disabled - View only');
+        }
+    }
+    
+    showPotentialPipes() {
+        this.potentialPipes.forEach(pipe => {
+            // Only show if it's not hidden by an existing pipe
+            const pipeExists = this.pipes.has(pipe.userData.key);
+            if (!pipeExists) {
+                pipe.visible = true;
+            }
+        });
+    }
+    
+    hidePotentialPipes() {
+        this.potentialPipes.forEach(pipe => {
+            pipe.visible = false;
+        });
+    }
+    
+    // Layer View Functions
+    toggleLayerView() {
+        this.layerView.enabled = !this.layerView.enabled;
+        const layerBtn = document.getElementById('layer-btn');
+        const layerControls = document.getElementById('layer-controls');
+        
+        if (this.layerView.enabled) {
+            layerBtn.classList.add('active');
+            layerControls.classList.add('visible');
+            this.analyzeLayers();
+            this.updateLayerView();
+            this.updateStatus('Layer view enabled');
+        } else {
+            layerBtn.classList.remove('active');
+            layerControls.classList.remove('visible');
+            this.showAllLayers();
+            this.updateStatus('Layer view disabled');
+        }
+    }
+    
+    analyzeLayers() {
+        // Collect all unique Y coordinates from junctions
+        const yCoords = new Set();
+        this.junctions.forEach(junction => {
+            yCoords.add(junction.position.y);
+        });
+        
+        // Sort Y coordinates
+        const sortedYs = Array.from(yCoords).sort((a, b) => a - b);
+        
+        // Create layer objects
+        this.layerView.layers = sortedYs.map((y, index) => {
+            return {
+                y: y,
+                index: index,
+                pipes: [],
+                junctions: [],
+                verticalPipes: [] // Pipes going up from this layer
+            };
+        });
+        
+        // Assign pipes to layers
+        this.pipes.forEach(pipe => {
+            const start = pipe.userData.start;
+            const end = pipe.userData.end;
+            const minY = Math.min(start.y, end.y);
+            const maxY = Math.max(start.y, end.y);
+            
+            // Check if pipe is horizontal (same Y)
+            if (Math.abs(start.y - end.y) < 0.01) {
+                // Horizontal pipe - belongs to the layer at this Y
+                const layer = this.layerView.layers.find(l => Math.abs(l.y - start.y) < 0.01);
+                if (layer) {
+                    layer.pipes.push(pipe);
+                }
+            } else {
+                // Vertical pipe - belongs to the lower layer
+                const layer = this.layerView.layers.find(l => Math.abs(l.y - minY) < 0.01);
+                if (layer) {
+                    layer.verticalPipes.push(pipe);
+                }
+            }
+        });
+        
+        // Assign junctions to layers
+        this.junctions.forEach(junction => {
+            const layer = this.layerView.layers.find(l => Math.abs(l.y - junction.position.y) < 0.01);
+            if (layer) {
+                layer.junctions.push(junction);
+            }
+        });
+        
+        this.layerView.totalLayers = this.layerView.layers.length;
+        this.layerView.currentLayer = Math.min(this.layerView.currentLayer, this.layerView.totalLayers - 1);
+        
+        // Update UI
+        document.getElementById('total-layers').textContent = this.layerView.totalLayers;
+        document.getElementById('layer-slider').max = Math.max(0, this.layerView.totalLayers - 1);
+        document.getElementById('layer-slider').value = this.layerView.currentLayer;
+    }
+    
+    updateLayerView() {
+        if (!this.layerView.enabled || this.layerView.layers.length === 0) {
+            this.showAllLayers();
+            return;
+        }
+        
+        const currentLayer = this.layerView.layers[this.layerView.currentLayer];
+        document.getElementById('current-layer').textContent = this.layerView.currentLayer;
+        
+        // Update button states
+        document.getElementById('prev-layer').disabled = this.layerView.currentLayer === 0;
+        document.getElementById('next-layer').disabled = this.layerView.currentLayer === this.layerView.totalLayers - 1;
+        
+        // Hide all pipes and junctions first (make them semi-transparent)
+        this.pipes.forEach(pipe => {
+            pipe.material.opacity = 0.15;
+            pipe.material.transparent = true;
+        });
+        
+        this.junctions.forEach(junction => {
+            junction.mesh.material.opacity = 0.15;
+            junction.mesh.material.transparent = true;
+        });
+        
+        // Show current layer (full opacity)
+        currentLayer.pipes.forEach(pipe => {
+            pipe.material.opacity = 1.0;
+        });
+        
+        currentLayer.verticalPipes.forEach(pipe => {
+            pipe.material.opacity = 1.0;
+        });
+        
+        currentLayer.junctions.forEach(junction => {
+            junction.mesh.material.opacity = 1.0;
+        });
+        
+        // Also show junctions at the top of vertical pipes
+        currentLayer.verticalPipes.forEach(pipe => {
+            const topY = Math.max(pipe.userData.start.y, pipe.userData.end.y);
+            const topPos = pipe.userData.start.y > pipe.userData.end.y ? pipe.userData.start : pipe.userData.end;
+            const topKey = this.positionToKey(topPos);
+            const topJunction = this.junctions.get(topKey);
+            if (topJunction) {
+                topJunction.mesh.material.opacity = 1.0;
+            }
+        });
+    }
+    
+    showAllLayers() {
+        // Reset all pipes and junctions to full opacity
+        this.pipes.forEach(pipe => {
+            pipe.material.opacity = 1.0;
+            pipe.material.transparent = true;
+        });
+        
+        this.junctions.forEach(junction => {
+            junction.mesh.material.opacity = 1.0;
+            junction.mesh.material.transparent = true;
+        });
+    }
+    
+    setLayer(layerIndex) {
+        this.layerView.currentLayer = layerIndex;
+        this.updateLayerView();
+    }
+    
+    previousLayer() {
+        if (this.layerView.currentLayer > 0) {
+            this.layerView.currentLayer--;
+            document.getElementById('layer-slider').value = this.layerView.currentLayer;
+            this.updateLayerView();
+        }
+    }
+    
+    nextLayer() {
+        if (this.layerView.currentLayer < this.layerView.totalLayers - 1) {
+            this.layerView.currentLayer++;
+            document.getElementById('layer-slider').value = this.layerView.currentLayer;
+            this.updateLayerView();
+        }
     }
     
     onWindowResize() {

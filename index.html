@@ -94,6 +94,92 @@
             background: #0b7dda;
         }
         
+        .button.active {
+            background: #FF9800;
+            box-shadow: 0 0 10px rgba(255, 152, 0, 0.5);
+        }
+        
+        .button.active:hover {
+            background: #F57C00;
+        }
+        
+        #layer-controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            min-width: 200px;
+            display: none;
+        }
+        
+        #layer-controls.visible {
+            display: block;
+        }
+        
+        #layer-controls h3 {
+            margin: 0 0 15px 0;
+            font-size: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+            padding-bottom: 8px;
+        }
+        
+        .layer-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        
+        .layer-selector label {
+            font-size: 14px;
+            flex: 1;
+        }
+        
+        #layer-slider {
+            width: 100%;
+            margin: 10px 0;
+        }
+        
+        .layer-info {
+            font-size: 12px;
+            color: #aaa;
+            margin-top: 10px;
+        }
+        
+        input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+        }
+        
+        .layer-buttons {
+            display: flex;
+            gap: 5px;
+            margin-top: 15px;
+        }
+        
+        .layer-btn {
+            flex: 1;
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .layer-btn:hover {
+            background: #0b7dda;
+        }
+        
+        .layer-btn:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        
         .info {
             font-size: 12px;
             margin-top: 15px;
@@ -123,8 +209,10 @@
     
     <div id="ui-panel">
         <h2>Pipe Structure Editor</h2>
+        <button class="button active" id="create-btn" data-tooltip="Creation Mode" title="Creation Mode">✏️</button>
         <button class="button" id="save-btn" data-tooltip="Save" title="Save">💾</button>
         <button class="button secondary" id="open-btn" data-tooltip="Open" title="Open">📂</button>
+        <button class="button" id="layer-btn" data-tooltip="Layer View" title="Layer View">📊</button>
         <button class="button danger" id="clear-btn" data-tooltip="Clear All" title="Clear All">🗑️</button>
         
         <div class="info">
@@ -134,6 +222,22 @@
             <p>• Scroll: Zoom</p>
             <p>• Left click pink lines to add pipes</p>
             <p>• Left click pipes to remove them</p>
+        </div>
+    </div>
+    
+    <!-- Layer Controls Panel -->
+    <div id="layer-controls">
+        <h3>Layer View</h3>
+        <div class="layer-selector">
+            <label>Layer: <span id="current-layer">0</span> / <span id="total-layers">0</span></label>
+        </div>
+        <input type="range" id="layer-slider" min="0" max="0" value="0" step="1">
+        <div class="layer-buttons">
+            <button class="layer-btn" id="prev-layer">◀ Prev</button>
+            <button class="layer-btn" id="next-layer">Next ▶</button>
+        </div>
+        <div class="layer-info">
+            <p>View structure layer by layer. Each layer shows horizontal pipes and vertical connections.</p>
         </div>
     </div>
     
