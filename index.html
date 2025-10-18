@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Pipe Structure Editor</title>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #ui-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            min-width: 60px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        #ui-panel h2 {
+            margin-top: 0;
+            font-size: 18px;
+            display: none;
+        }
+        
+        .button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px;
+            margin: 5px 0;
+            border-radius: 4px;
+            cursor: pointer;
+            width: 50px;
+            height: 50px;
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        
+        .button:hover {
+            background: #45a049;
+        }
+        
+        .button:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: 65px;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            white-space: nowrap;
+            font-size: 12px;
+            z-index: 1000;
+        }
+        
+        .button.danger {
+            background: #f44336;
+        }
+        
+        .button.danger:hover {
+            background: #da190b;
+        }
+        
+        .button.secondary {
+            background: #2196F3;
+        }
+        
+        .button.secondary:hover {
+            background: #0b7dda;
+        }
+        
+        .info {
+            font-size: 12px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255, 255, 255, 0.3);
+            display: none;
+        }
+        
+        .info p {
+            margin: 5px 0;
+        }
+        
+        #status {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    
+    <div id="ui-panel">
+        <h2>Pipe Structure Editor</h2>
+        <button class="button" id="save-btn" data-tooltip="Save" title="Save">💾</button>
+        <button class="button secondary" id="open-btn" data-tooltip="Open" title="Open">📂</button>
+        <button class="button danger" id="clear-btn" data-tooltip="Clear All" title="Clear All">🗑️</button>
+        
+        <div class="info">
+            <p><strong>Controls:</strong></p>
+            <p>• Middle mouse: Rotate</p>
+            <p>• Right mouse: Pan</p>
+            <p>• Scroll: Zoom</p>
+            <p>• Left click pink lines to add pipes</p>
+            <p>• Left click pipes to remove them</p>
+        </div>
+    </div>
+    
+    <!-- Hidden file input for opening files -->
+    <input type="file" id="file-input" accept=".json" style="display: none;">
+    
+    <div id="status">Ready</div>
+    
+    <script type="module" src="main.js"></script>
+</body>
+</html>
